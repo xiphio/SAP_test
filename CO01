@@ -1,0 +1,589 @@
+
+REPORT  YCO001.
+
+*
+************************************************************************
+*eject
+************************************************************************
+* Includes
+TYPE-POOLS:ABAP.
+
+************************************************************************
+************************************************************************
+* tables
+************************************************************************
+TABLES:TKEB,BKPF,BSEG,ZZTCOEVR,CE12000,ZZTCOE2000AA.
+************************************************************************
+* internal tables
+************************************************************************
+
+DATA:IT_COMVS LIKE ZZTCOMVS OCCURS 0. "字段配置表
+
+FIELD-SYMBOLS: <FS_TABLE> TYPE TABLE ,
+               <FS_TABLE_CLS> TYPE TABLE ,
+               <FS_WA>,
+               <FS_FIELD>,
+               <FS_TABLE_COE> TYPE TABLE ,
+               <FS_WA_COE>,
+               <FS_FIELD_COE>.
+
+DATA:IT_DYTAB TYPE REF TO DATA,
+      WA_LINE TYPE REF TO DATA,
+      WA_XFC TYPE LVC_S_FCAT,
+      IT_XFC TYPE LVC_T_FCAT,
+      IT_DYTAB_COE TYPE REF TO DATA,
+      WA_LINE_COE TYPE REF TO DATA,
+      WA_XFC_COE TYPE LVC_S_FCAT,
+      IT_XFC_COE TYPE LVC_T_FCAT .
+
+DATA IT_AA TYPE STANDARD TABLE OF ZZTCOE2000AA.
+DATA WA_AA TYPE ZZTCOE2000AA.
+
+************************************************************************
+* internal data fields
+************************************************************************
+DATA:WA_COMVS LIKE ZZTCOMVS. "字段配置表工作区
+DATA:G_TABNAME(30) TYPE C.   "表名称
+
+DATA:G_PERIO TYPE JAHRPER,
+     L_MON(3) TYPE C,
+     L_YEAR(4) TYPE C.
+DATA:P_PERIO TYPE JAHRPER.  "年度期间
+
+DATA:LR_VRGAR LIKE ZZERANGE_L OCCURS 0 WITH HEADER LINE.
+*DATA P_EXPORT(1) TYPE C VALUE ''.
+
+************************************************************************
+* Parameters and Selection Options
+************************************************************************
+SELECTION-SCREEN BEGIN OF BLOCK B0 WITH FRAME TITLE TEXT-000.
+PARAMETERS: P_ERKRS LIKE TKEB-ERKRS OBLIGATORY MEMORY ID S_ERKRS,
+            P_BUKRS TYPE BUKRS          OBLIGATORY  MEMORY ID S_BUKRS ,
+            P_GJAHR LIKE BKPF-GJAHR     OBLIGATORY MEMORY ID S_GJAHR,"会计年度
+            P_MONAT LIKE BKPF-MONAT     OBLIGATORY MEMORY ID S_MONAT"会计期间.
+            .
+SELECTION-SCREEN END OF BLOCK B0.
+SELECTION-SCREEN BEGIN OF BLOCK B1 WITH FRAME TITLE TEXT-001.
+SELECT-OPTIONS: S_VRGAR FOR CE12000-VRGAR OBLIGATORY.
+SELECTION-SCREEN END OF BLOCK B1 .
+SELECTION-SCREEN BEGIN OF BLOCK B2 WITH FRAME TITLE TEXT-002.
+SELECT-OPTIONS: S_WERKS FOR BSEG-WERKS.
+SELECTION-SCREEN COMMENT /1(30) BLANK.
+
+PARAMETERS:  P_REFRE TYPE C AS CHECKBOX DEFAULT 'X'.
+PARAMETERS:  P_EXPORT TYPE C AS CHECKBOX DEFAULT ''.
+PARAMETERS:  P_SVPAR TYPE C AS CHECKBOX DEFAULT ''.
+*IF SY-UNAME = 'ADMIN'.
+*  PARAMETERS:  P_EXPOR1 TYPE C AS CHECKBOX DEFAULT '' .
+*  P_EXPORT = P_EXPOR1.
+*ENDIF.
+SELECTION-SCREEN END OF BLOCK B2.
+*--------------------------------------------------------------------*隐藏
+*IF SY-UNAME = 'ADMIN'.
+*
+*ENDIF.
+*--------------------------------------------------------------------*周钟辉 2011-06-21
+INCLUDE: ZHCO_INCLUDE_FRM.
+************************************************************************
+* Initialization
+************************************************************************
+INITIALIZATION.
+  CALL FUNCTION 'YH_CO_PARA_GET'
+    EXPORTING
+      PROGNAME       = SY-REPID
+      PARANAME       = 'S_VRGAR'
+      PARATYPE       = 'S'
+*   IMPORTING
+*     MSGTYPE        =
+*     MEGSTR         =
+    TABLES
+      RANGEVAL       = LR_VRGAR[]
+*   CHANGING
+*     PARAVAL        =
+            .
+  CLEAR S_VRGAR.
+  CLEAR S_VRGAR[].
+  LOOP AT LR_VRGAR.
+    S_VRGAR-SIGN   = LR_VRGAR-SIGN.
+    S_VRGAR-OPTION = LR_VRGAR-OPTION.
+    S_VRGAR-LOW    = LR_VRGAR-LOW.
+    S_VRGAR-HIGH   = LR_VRGAR-HIGH.
+    APPEND S_VRGAR.
+    CLEAR LR_VRGAR.
+  ENDLOOP.
+  CLEAR LR_VRGAR[].
+
+
+************************************************************************
+* at selection screen
+************************************************************************
+AT SELECTION-SCREEN.
+
+  IF P_MONAT > 12.
+    MESSAGE E001(YHCO02).
+  ENDIF.
+  IF P_EXPORT IS NOT INITIAL AND SY-UNAME <> 'HANDFICO' .
+    CLEAR P_EXPORT.
+    MESSAGE '你不是ADMIN用户，无法使用不汇总差异功能' TYPE 'E'.
+
+  ENDIF.
+*  PERfORM FRM_check_period.
+************************************************************************
+* Event top of page
+************************************************************************
+TOP-OF-PAGE.
+
+************************************************************************
+* event Start of Selection
+************************************************************************
+START-OF-SELECTION.
+  IF P_SVPAR IS NOT INITIAL.
+    CLEAR LR_VRGAR.
+    CLEAR LR_VRGAR[].
+    LOOP AT S_VRGAR.
+      CLEAR LR_VRGAR.
+      LR_VRGAR-SIGN   = S_VRGAR-SIGN.
+      LR_VRGAR-OPTION = S_VRGAR-OPTION.
+      LR_VRGAR-LOW    = S_VRGAR-LOW.
+      LR_VRGAR-HIGH   = S_VRGAR-HIGH.
+      APPEND LR_VRGAR.
+      CLEAR LR_VRGAR.
+    ENDLOOP.
+
+    CALL FUNCTION 'YH_CO_PARA_SAVE'
+      EXPORTING
+        PROGNAME       = SY-REPID
+        PARANAME       = 'S_VRGAR'
+        PARATYPE       = 'S'
+*       PARAGRP        =
+*       PARAVAL        =
+*     IMPORTING
+*       MSGTYPE        =
+*       MEGSTR         =
+      TABLES
+        RANGEVAL       = LR_VRGAR[]
+              .
+    CLEAR LR_VRGAR.
+    CLEAR LR_VRGAR[].
+
+  ENDIF.
+  CONCATENATE P_GJAHR '0' P_MONAT INTO P_PERIO.
+  CONCATENATE 'ZZTCOE' P_ERKRS 'A' INTO G_TABNAME. "获得表名
+  PERFORM FRM_CHECK_COUNT .
+  PERFORM FRM_BEGINLOG USING 'ZCO01'.
+  PERFORM FRM_GET_STRUCTURE.
+  PERFORM FRM_GET_DATA.
+  PERFORM FRM_ENDLOG USING 'ZCO01' 'S'.
+
+
+************************************************************************
+*EVENT End-of selection
+************************************************************************
+END-OF-SELECTION.
+
+************************************************************************
+*EVENT  End-of page
+************************************************************************
+END-OF-PAGE.
+************************************************************************
+
+************************************************************************
+** forms
+************************************************************************
+*&---------------------------------------------------------------------*
+*&      Form  FRM_GET_STRUCTURE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM FRM_GET_STRUCTURE .
+*在此根据表ZZTCOEXXXA中的字段和配置表ZZTCOMVS中的字段创建结构和内表用于从
+*从 CE1XXX表中取得数据
+
+  DATA : REF_TABLE_DES TYPE REF TO CL_ABAP_STRUCTDESCR.
+  DATA:IT_DETAILS  TYPE ABAP_COMPDESCR_TAB,
+       WA_DETAILS TYPE ABAP_COMPDESCR.
+*从配置表中取得vvcode 字段
+  SELECT *
+    INTO TABLE IT_COMVS
+    FROM ZZTCOMVS
+    WHERE ERKRS = P_ERKRS.
+
+*整理将要从ce1XXX表中取得的字段，并根据此结构创建内表
+
+  CLEAR WA_XFC.
+  WA_XFC-FIELDNAME = 'ERKRS' .  "经营范围
+  WA_XFC-INTTYPE = 'C'.
+  WA_XFC-INTLEN = 4.
+  WA_XFC-DECIMALS = 0.
+  APPEND WA_XFC TO IT_XFC.
+
+  CLEAR WA_XFC.
+  WA_XFC-FIELDNAME = 'PALEDGER' .  "经营范围的货币类型
+*    xfc-datatype = xdetails-type_kind.
+  WA_XFC-INTTYPE = 'C'.
+  WA_XFC-INTLEN = 2.
+  WA_XFC-DECIMALS = 0.
+  APPEND WA_XFC TO IT_XFC.
+
+  CLEAR WA_XFC.
+  WA_XFC-FIELDNAME = 'PAOBJNR' .  "获利能力段编号(CO-PA)
+*    xfc-datatype = xdetails-type_kind.
+  WA_XFC-INTTYPE = 'N'.
+  WA_XFC-INTLEN = 10.
+  WA_XFC-DECIMALS = 0.
+  APPEND WA_XFC TO IT_XFC.
+
+  CLEAR WA_XFC.
+  WA_XFC-FIELDNAME = 'PERIO' .   "期间/年度
+*    xfc-datatype = xdetails-type_kind.
+  WA_XFC-INTTYPE = 'C'.
+  WA_XFC-INTLEN = 7.
+  WA_XFC-DECIMALS = 0.
+  APPEND WA_XFC TO IT_XFC.
+
+  CLEAR WA_XFC.
+  WA_XFC-FIELDNAME = 'BUKRS' .   "公司代码
+*    xfc-datatype = xdetails-type_kind.
+  WA_XFC-INTTYPE = 'C'.
+  WA_XFC-INTLEN = 4.
+  WA_XFC-DECIMALS = 0.
+  APPEND WA_XFC TO IT_XFC.
+
+  CLEAR WA_XFC.
+  WA_XFC-FIELDNAME = 'WERKS' .  "工厂
+*    xfc-datatype = xdetails-type_kind.
+  WA_XFC-INTTYPE = 'C'.
+  WA_XFC-INTLEN = 4.
+  WA_XFC-DECIMALS = 0.
+  APPEND WA_XFC TO IT_XFC.
+
+
+  CLEAR WA_XFC.
+  WA_XFC-FIELDNAME = 'PLIKZ' .  "计划/实际标识
+*    xfc-datatype = xdetails-type_kind.
+  WA_XFC-INTTYPE = 'C'.
+  WA_XFC-INTLEN = 1.
+  WA_XFC-DECIMALS = 0.
+  APPEND WA_XFC TO IT_XFC.
+
+  CLEAR WA_XFC.
+  WA_XFC-FIELDNAME = 'ARTNR' .  "产品号
+*    xfc-datatype = xdetails-type_kind.
+  WA_XFC-INTTYPE = 'C'.
+  WA_XFC-INTLEN = 18.
+  WA_XFC-DECIMALS = 0.
+  APPEND WA_XFC TO IT_XFC.
+
+  LOOP AT IT_COMVS INTO WA_COMVS.
+    CLEAR WA_XFC.
+    WA_XFC-FIELDNAME = WA_COMVS-FRVVCODE .
+*    xfc-datatype = xdetails-type_kind.
+    WA_XFC-INTTYPE = 'P'.
+    WA_XFC-INTLEN = 10.
+    WA_XFC-DECIMALS = 2.
+    APPEND WA_XFC TO IT_XFC.
+  ENDLOOP.
+
+
+* 取得ZZTCOEXXXX表中的结构，并定义与此结构相同的内表，用于整理数据
+
+
+  REF_TABLE_DES ?=
+       CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME( G_TABNAME ).
+  IT_DETAILS[] = REF_TABLE_DES->COMPONENTS[].
+
+  LOOP AT IT_DETAILS INTO WA_DETAILS.
+    CLEAR WA_XFC_COE.
+    WA_XFC_COE-FIELDNAME = WA_DETAILS-NAME .
+*    xfc-datatype = xdetails-type_kind.
+    WA_XFC_COE-INTTYPE = WA_DETAILS-TYPE_KIND.
+    WA_XFC_COE-INTLEN = WA_DETAILS-LENGTH + WA_DETAILS-DECIMALS.
+    WA_XFC_COE-DECIMALS = WA_DETAILS-DECIMALS.
+    APPEND WA_XFC_COE TO IT_XFC_COE.
+  ENDLOOP.
+
+  PERFORM FRM_CREAT_DY_ITAB.
+ENDFORM.                    " FRM_GET_STRUCTURE
+*&---------------------------------------------------------------------*
+*&      Form  FRM_CREAT_DY_ITAB
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM FRM_CREAT_DY_ITAB .
+* 从IT_XFC中取得将要从CE1XXX表中获取的字段结构，并定义内表和工作区
+  CALL METHOD CL_ALV_TABLE_CREATE=>CREATE_DYNAMIC_TABLE
+    EXPORTING
+      IT_FIELDCATALOG = IT_XFC
+    IMPORTING
+      EP_TABLE        = IT_DYTAB.
+
+  ASSIGN IT_DYTAB->* TO <FS_TABLE>.
+  ASSIGN IT_DYTAB->* TO <FS_TABLE_CLS>.
+
+  CREATE DATA WA_LINE LIKE LINE OF  <FS_TABLE>.
+  ASSIGN WA_LINE->* TO <FS_WA>.
+
+
+*获取表ZZTCXXXX的结构并定义相关内表和工作区
+  CALL METHOD CL_ALV_TABLE_CREATE=>CREATE_DYNAMIC_TABLE
+    EXPORTING
+      IT_FIELDCATALOG = IT_XFC_COE
+    IMPORTING
+      EP_TABLE        = IT_DYTAB_COE.
+
+  ASSIGN IT_DYTAB_COE->* TO <FS_TABLE_COE>.
+
+  CREATE DATA WA_LINE_COE LIKE LINE OF  <FS_TABLE_COE>.
+  ASSIGN WA_LINE_COE->* TO <FS_WA_COE>.
+
+
+
+ENDFORM.                    " FRM_CREAT_DY_ITAB
+*&---------------------------------------------------------------------*
+*&      Form  FRM_GET_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM FRM_GET_DATA .
+  DATA: BEGIN OF LT_FIELDS OCCURS 0,
+         FIELDNAME(60) TYPE C,
+       END OF LT_FIELDS.
+
+  DATA:L_TABLE(30) TYPE C.
+  RANGES:R_BELNR FOR CE12000-BELNR.
+
+
+*  从CE1XXX表中取得数据
+  CONCATENATE 'CE1' P_ERKRS INTO L_TABLE.
+
+  SELECT *
+    INTO CORRESPONDING FIELDS OF  TABLE <FS_TABLE>
+    FROM (L_TABLE)
+    WHERE PALEDGER = '02'                                   "10  公司货币码
+      AND PERIO = P_PERIO
+      AND BUKRS = P_BUKRS
+      AND WERKS IN S_WERKS
+      AND VRGAR IN S_VRGAR .
+
+  PERFORM FRM_SELECT_DATA TABLES <FS_TABLE> <FS_TABLE_CLS>.
+
+
+ENDFORM.                    " FRM_GET_DATA
+*&---------------------------------------------------------------------*
+*&      Form  FRM_SELECT_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_FT_TABLE  text
+*----------------------------------------------------------------------*
+FORM FRM_SELECT_DATA  TABLES  FT_TABLES FS_TABLE_CLS.
+  "插入正确名称 <...>.
+  DATA:L_FIELDNAME(30) TYPE C,
+       L_TYPE(30) TYPE C VALUE 'TYPE',      "差异类型
+       L_DMBTR(30) TYPE C VALUE 'DMBTR',    "金额
+       L_ELEMT(30) TYPE C VALUE 'ELEMT',    "成本构成号
+       L_ELEHK(30) TYPE C VALUE 'ELEHK',    "成本构成结构
+       L_ERKRS(30) TYPE C VALUE  'ERKRS',    "经营范围
+       L_PALEDGER(30) TYPE C VALUE  'PALEDGER',    "经营范围的货币类型
+       L_PAOBJNR(30) TYPE C  VALUE  'PAOBJNR',    "经营范围的货币类型
+       L_PERIO(30) TYPE C VALUE  'PERIO',    "期间/年度
+       L_BUKRS(30) TYPE C VALUE  'BUKRS',    "公司代码
+       L_WERKS(30) TYPE C VALUE  'WERKS',    "工厂
+       L_ARTNR(30) TYPE C VALUE  'ARTNR',    "产品号
+       L_FRVVCODE(30) TYPE C VALUE  'FRVVCODE',    "来源VVCODE
+       L_TOVVCODE(30) TYPE C VALUE  'TOVVCODE',    "去向VVCODE
+       L_DUMMY ,
+       L_MATNR TYPE MATNR,
+       L_TYPE1 TYPE ZZEVTYPE .
+  DATA:LW_COE LIKE ZZTCOEVR. "ZZTCOEXXXX的参考表
+  DATA:LT_COE TYPE STANDARD TABLE OF ZZTCOEVR. "ZZTCOEXXXX的参考表
+  DATA:L_DATA TYPE P LENGTH 6 DECIMALS 2.
+  FIELD-SYMBOLS:<L_DMBTR> ,
+                <L_VVCODEVALUE>,
+                <L_TYPE>,
+                <L_ELEMT>,
+                <L_ELEHK>,
+                <L_ERKRS>,
+                <L_PALEDGER>,
+                <L_PAOBJNR>,
+                <L_PERIO>,
+                <L_BUKRS>,
+                <L_WERKS>,
+                <L_ARTNR>,
+                <L_FRVVCODE>,
+                <L_TOVVCODE>
+                .
+
+  SORT IT_COMVS BY FRVVCODE.
+  READ TABLE IT_COMVS INTO WA_COMVS INDEX 1.
+  ASSIGN COMPONENT L_TYPE OF STRUCTURE <FS_WA_COE> TO <L_TYPE>.     "差异类型
+  IF SY-SUBRC <> 0.
+    ASSIGN L_DUMMY TO <L_TYPE>.
+  ENDIF.
+
+  ASSIGN COMPONENT L_ELEMT OF STRUCTURE <FS_WA_COE> TO <L_ELEMT>.    "成本构成号
+  IF SY-SUBRC <> 0.
+    ASSIGN L_DUMMY TO <L_ELEMT>.
+  ENDIF.
+
+  ASSIGN COMPONENT L_ELEHK OF STRUCTURE <FS_WA_COE> TO <L_ELEHK>.    "成本构成结构
+  IF SY-SUBRC <> 0.
+    ASSIGN L_DUMMY TO <L_ELEHK>.
+  ENDIF.
+
+  ASSIGN COMPONENT L_DMBTR OF STRUCTURE <FS_WA_COE> TO <L_DMBTR>.    "金额
+
+  ASSIGN COMPONENT L_ARTNR OF STRUCTURE <FS_WA_COE> TO <L_ARTNR>.  "物料编号
+
+  "期间
+  ASSIGN COMPONENT L_PERIO OF STRUCTURE <FS_WA_COE> TO <L_PERIO>.
+  "公司代码
+  ASSIGN COMPONENT L_BUKRS OF STRUCTURE <FS_WA_COE> TO <L_BUKRS>.
+  "工厂
+  ASSIGN COMPONENT L_WERKS OF STRUCTURE <FS_WA_COE> TO <L_WERKS>.
+  "PSG段号
+  ASSIGN COMPONENT L_PAOBJNR OF STRUCTURE <FS_WA_COE> TO <L_PAOBJNR>.
+  "来源VVCODE
+  ASSIGN COMPONENT L_FRVVCODE OF STRUCTURE <FS_WA_COE> TO <L_FRVVCODE>.
+  "去向VVCODE
+  ASSIGN COMPONENT L_TOVVCODE OF STRUCTURE <FS_WA_COE> TO <L_TOVVCODE>.
+
+
+* 在此根据CE1XXX中的值和配置表对数据进行汇总
+  "DELETE FT_TABLES WHERE MATNR IS INITIAL.
+  LOOP AT FT_TABLES.
+    MOVE-CORRESPONDING FT_TABLES TO <FS_WA_COE>.
+    L_MATNR = <L_ARTNR>.
+    IF L_MATNR = '' OR L_MATNR IS INITIAL.
+      CONTINUE.
+    ENDIF.
+
+    LOOP AT IT_COMVS INTO WA_COMVS.
+
+      <L_TYPE> = WA_COMVS-TYPE.
+      <L_ELEMT> = WA_COMVS-ELEMT.
+      <L_ELEHK> = WA_COMVS-ELEHK.
+      <L_FRVVCODE> = WA_COMVS-FRVVCODE.
+      <L_TOVVCODE> = WA_COMVS-TOVVCODE.
+      L_FIELDNAME = <L_FRVVCODE>.
+      ASSIGN COMPONENT L_FIELDNAME OF STRUCTURE FT_TABLES TO <L_VVCODEVALUE>.
+      <L_DMBTR> =  <L_VVCODEVALUE>.
+
+*      IF <L_DMBTR> = 0.
+*        CONTINUE.
+*      ENDIF.
+
+      IF  WA_COMVS-ZSUM <> ''.  "对于既有汇总的差异需要同时计算汇总和明细
+        COLLECT <FS_WA_COE> INTO <FS_TABLE_COE>.  "明细
+        <L_TYPE> = ''.
+        <L_ELEMT> = ''.
+        COLLECT <FS_WA_COE> INTO <FS_TABLE_COE>.  "汇总
+        <L_TYPE> = WA_COMVS-TYPE.
+        <L_ELEMT> = WA_COMVS-ELEMT.
+      ELSE.
+        COLLECT <FS_WA_COE> INTO <FS_TABLE_COE>.
+      ENDIF.
+    ENDLOOP.
+  ENDLOOP.
+
+* 将数据写入数据库表
+  CLEAR WA_AA.
+  CLEAR IT_AA.
+  CLEAR LT_COE.
+  SORT <FS_TABLE_COE>.
+  LOOP AT <FS_TABLE_COE> INTO <FS_WA_COE>.
+    MOVE-CORRESPONDING <FS_WA_COE> TO LW_COE.
+    LW_COE-ERKRS = P_ERKRS.
+    MOVE-CORRESPONDING LW_COE TO WA_AA.
+    IF LW_COE-DMBTR <> 0 AND LW_COE-DMBTR IS NOT INITIAL.
+      APPEND WA_AA TO IT_AA.
+      IF P_EXPORT IS INITIAL.
+        CLEAR LW_COE-PAOBJNR.
+      ENDIF.
+      COLLECT LW_COE INTO LT_COE.
+*      APPEND LW_COE TO LT_COE.
+    ENDIF.
+    CLEAR WA_AA.
+    CLEAR LW_COE.
+  ENDLOOP.
+  DATA:L_SP TYPE ZZEPERIO.
+  CLEAR L_SP.
+  CALL FUNCTION 'CONVERSION_EXIT_PERI7_INPUT'
+    EXPORTING
+      INPUT           = L_SP
+    IMPORTING
+      OUTPUT          = L_SP
+    EXCEPTIONS
+      INPUT_NOT_VALID = 1
+      OTHERS          = 2.
+  IF SY-SUBRC <> 0.
+* MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*         WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+  ENDIF.
+
+*  DELETE FROM (G_TABNAME) WHERE PERIO = P_PERIO AND BUKRS = P_BUKRS AND WERKS IN S_WERKS AND SPERIO = L_SP.
+  DELETE FROM ZZTCOE2000A WHERE PERIO = P_PERIO AND BUKRS = P_BUKRS AND WERKS IN S_WERKS AND SPERIO = L_SP.
+*  DELETE FROM ZZTCOE2000A WHERE ARTNR = '1095X0556-001-XQ'.
+  COMMIT WORK AND WAIT.
+  INSERT (G_TABNAME) FROM TABLE LT_COE ACCEPTING DUPLICATE KEYS.
+  COMMIT WORK AND WAIT.
+
+*--添加反向COPA过账的PSG编号至依赖表1（ZZTCOE2000AA）-----------
+  DELETE FROM ZZTCOE2000AA WHERE PERIO = P_PERIO AND BUKRS = P_BUKRS AND WERKS IN S_WERKS AND PROCFLAG = ''.
+  INSERT ZZTCOE2000AA FROM TABLE IT_AA ACCEPTING DUPLICATE KEYS.
+  COMMIT WORK AND WAIT.
+  IF SY-BATCH IS INITIAL.
+    MESSAGE '计算完成' TYPE 'S'.
+  ENDIF.
+
+ENDFORM.                    " FRM_SELECT_DATA
+*&---------------------------------------------------------------------*
+*&      Form  FRM_CHECK_COUNT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM FRM_CHECK_COUNT . "检查数据是否已经存在
+
+  DATA:L_BUKRS TYPE BUKRS.
+  DATA:L_TABLE(30) TYPE C.
+  RANGES:R_BELNR FOR CE12000-BELNR.
+
+
+*  从CE1XXXx表中取得数据
+
+  SELECT SINGLE BUKRS
+    INTO L_BUKRS
+    FROM (G_TABNAME)
+    WHERE
+      PERIO = P_PERIO
+     AND BUKRS = P_BUKRS
+     AND WERKS IN S_WERKS
+    .
+
+  IF SY-SUBRC = 0 AND P_REFRE = ''.
+
+    MESSAGE E102(YHCO02).
+
+  ELSEIF SY-SUBRC = 0 AND P_REFRE = 'X'. "删除已存在的数据
+*    DELETE FROM  (G_TABNAME)
+*    WHERE
+*     PERIO = P_PERIO
+*    AND BUKRS = P_BUKRS
+*    AND WERKS IN S_WERKS
+*    .
+
+  ENDIF.
+
+ENDFORM.                    " FRM_CHECK_COUNT
